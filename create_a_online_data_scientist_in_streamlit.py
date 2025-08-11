@@ -2,114 +2,127 @@ import streamlit as st
 import pandas as pd
 import requests
 import json
-import altair as alt
 import folium
-from streamlit_folium import folium_static
+import matplotlib.pyplot as plt
+import altair as alt
 
 # Function to fetch data from OData
 def fetch_odata(url):
     response = requests.get(url)
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error("Failed to fetch OData.")
-        return None
+    return response.json()
 
 # Function to fetch data from WFS
 def fetch_wfs(url):
     response = requests.get(url)
-    if response.status_code == 200:
-        return response.content
-    else:
-        st.error("Failed to fetch WFS.")
-        return None
+    return response.content
 
 # Function to fetch data from GraphQL
 def fetch_graphql(url, query):
     response = requests.post(url, json={'query': query})
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error("Failed to fetch GraphQL.")
-        return None
+    return response.json()
 
 # Function to fetch data from SPARQL
-def fetch_sparql(url, query):
-    response = requests.get(url, params={'query': query, 'format': 'json'})
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error("Failed to fetch SPARQL.")
-        return None
+def fetch_sparql(endpoint, query):
+    response = requests.get(endpoint, params={'query': query, 'format': 'json'})
+    return response.json()
 
-# Function to connect to MCP server
-def connect_to_mcp(server_url, input_data):
-    response = requests.post(server_url, json={'input': input_data})
-    if response.status_code == 200:
-        return response.json()
-    else:
-        st.error("Failed to connect to MCP server.")
-        return None
+# Function to display data as a map
+def display_map(data):
+    m = folium.Map(location=[data['latitude'].mean(), data['longitude'].mean()], zoom_start=10)
+    for _, row in data.iterrows():
+        folium.Marker([row['latitude'], row['longitude']], popup=row['name']).add_to(m)
+    return m
+
+# Function to display data as a chart
+def display_chart(data):
+    chart = alt.Chart(data).mark_bar().encode(
+        x='category',
+        y='value'
+    )
+    return chart
+
+# Function to display data as a table
+def display_table(data):
+    return pd.DataFrame(data)
 
 # Streamlit application
 st.title("Online Data Scientist")
 
-# Input for online resources
-resource_type = st.selectbox("Select Resource Type", ["OData", "WFS", "GraphQL", "SPARQL"])
-resource_url = st.text_input("Enter Resource URL")
-query = st.text_area("Enter Query (if applicable)")
+# Input for resource URLs
+odata_url = st.text_input("OData URL")
+wfs_url = st.text_input("WFS URL")
+graphql_url = st.text_input("GraphQL URL")
+sparql_url = st.text_input("SPARQL Endpoint")
 
-if st.button("Fetch Data"):
-    if resource_type == "OData":
-        data = fetch_odata(resource_url)
-    elif resource_type == "WFS":
-        data = fetch_wfs(resource_url)
-    elif resource_type == "GraphQL":
-        data = fetch_graphql(resource_url, query)
-    elif resource_type == "SPARQL":
-        data = fetch_sparql(resource_url, query)
+# Input for GraphQL query
+graphql_query = st.text_area("GraphQL Query")
 
-    if data:
-        st.write(data)
+# Fetch and display data
+if st.button("Fetch OData"):
+    odata_result = fetch_odata(odata_url)
+    st.write(display_table(odata_result))
 
-        # Display data as a table if it's a DataFrame
-        if isinstance(data, dict) and 'value' in data:
-            df = pd.DataFrame(data['value'])
-            st.write(df)
+if st.button("Fetch WFS"):
+    wfs_result = fetch_wfs(wfs_url)
+    st.write(wfs_result)
 
-            # Display chart
-            if st.checkbox("Show Chart"):
-                chart = alt.Chart(df).mark_bar().encode(
-                    x=alt.X(df.columns[0]),
-                    y=alt.Y(df.columns[1])
-                )
-                st.altair_chart(chart)
+if st.button("Fetch GraphQL"):
+    graphql_result = fetch_graphql(graphql_url, graphql_query)
+    st.write(display_table(graphql_result))
 
-            # Display map if coordinates are available
-            if 'latitude' in df.columns and 'longitude' in df.columns:
-                m = folium.Map(location=[df['latitude'].mean(), df['longitude'].mean()], zoom_start=10)
-                for _, row in df.iterrows():
-                    folium.Marker([row['latitude'], row['longitude']], popup=row.to_json()).add_to(m)
-                folium_static(m)
+if st.button("Fetch SPARQL"):
+    sparql_query = st.text_area("SPARQL Query")
+    sparql_result = fetch_sparql(sparql_url, sparql_query)
+    st.write(display_table(sparql_result))
 
-# Input for MCP server
-mcp_server_url = st.text_input("Enter MCP Server URL")
-mcp_input = st.text_area("Enter Input for MCP")
+# Display results as map, chart, or table
+if st.button("Display Map"):
+    if 'latitude' in odata_result and 'longitude' in odata_result:
+        map_data = pd.DataFrame(odata_result)
+        st.write(display_map(map_data))
 
-if st.button("Send to MCP"):
-    if mcp_server_url and mcp_input:
-        mcp_response = connect_to_mcp(mcp_server_url, mcp_input)
-        if mcp_response:
-            st.write(mcp_response)
+if st.button("Display Chart"):
+    if 'category' in odata_result and 'value' in odata_result:
+        chart_data = pd.DataFrame(odata_result)
+        st.altair_chart(display_chart(chart_data))
 
-# Keep track of resources
-if 'resources' not in st.session_state:
-    st.session_state.resources = []
+# Dockerfile content
+dockerfile_content = """
+# Use the official Python image from the Docker Hub
+FROM python:3.9-slim
 
-if st.button("Save Resource"):
-    if resource_url and resource_type:
-        st.session_state.resources.append({'type': resource_type, 'url': resource_url})
-        st.success("Resource saved!")
+# Set the working directory
+WORKDIR /app
 
-st.write("Saved Resources:")
-st.write(st.session_state.resources)
+# Copy the requirements file into the container
+COPY requirements.txt .
+
+# Install the required packages
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application code
+COPY . .
+
+# Command to run the application
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+"""
+
+# requirements.txt content
+requirements_content = """
+streamlit
+pandas
+requests
+folium
+matplotlib
+altair
+"""
+
+# Write Dockerfile
+with open("Dockerfile", "w") as f:
+    f.write(dockerfile_content)
+
+# Write requirements.txt
+with open("requirements.txt", "w") as f:
+    f.write(requirements_content)
+
+st.success("Dockerfile and requirements.txt have been created.")
